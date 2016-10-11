@@ -16,3 +16,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 **Author:** Tom Sightler (tom.sightler@veeam.com)
 
 **Function:** Pre-Freeze/Post-Thaw script to take snapshot based backups of SAP HANA on Linux
+ 
