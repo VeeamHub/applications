@@ -1,0 +1,51 @@
+# VMs to Restore
+$VMs = "dc01,dc02"
+$vCenterServerName = "vc01.notyourdomain.com"
+
+# Target options for restored VMs
+$TargetHost = "esx04.notyourdomain.com"
+$TargetFolder = "UAT"
+$TargetResourcePool = "UAT"
+$TargetVMSuffix = "_uat"
+
+asnp VeeamPSSnapin
+
+$VMs = $VMs.Split(",")
+
+#Get the vCenter Server:
+$VCenterServer = Get-VBRServer -Name ($VCenterServerName)
+Write-Host "`VCenter Server: $($VCenterServer.RealName)"
+
+#Get the Backup Server:
+$RestoreHost = Get-VBRServer -Name ($TargetHost)
+Write-Host "`Target Host:  $($RestoreHost.RealName)"
+
+# Get the Target Environment Resource Pool, Datastore and Folder objects for Restore
+$ResourcePool = Find-VBRViResourcePool -Server ($VCenterServer) -Name ($TargetResourcePool)
+Write-Host "`Target Resource Pool:  $($ResourcePool.Name)"
+$Folder = Find-VBRViFolder -Server ($VCenterServer) -Name ($TargetFolder)
+Write-Host "`Target Folder Path:         $($Folder.Path)"
+
+Write-Host ""
+Write-Host "-- Starting Instant Restore Sessions -------------------------"
+
+# Loop through all of the array Items to perform Restore
+$i = 1
+foreach($VM in $VMs) {
+    $RestoredVMName = $VM + $TargetVMSuffix
+    # Get Latest Restore Point for VM
+    $LastVMRestorePoint = Get-VBRRestorePoint -Backup (Get-VBRBackup | ?{$_.JobType -eq "Backup"}) -Name $VM| Sort-Object -Property CreationDate | Select -Last 1
+     
+    # Start Instant Restore of the VM
+    $(Start-VBRInstantRecovery -RunAsync -RestorePoint ($LastVMRestorePoint) -Server ($RestoreHost) -ResourcePool ($ResourcePool) -Folder ($Folder) -VMName ($RestoredVMName) -NICsEnabled) 2>&1 | Out-Null
+
+    # Format index to 2 digits with leading 0's, for display purposes
+    $ArrayIndexCounter = "{0:D2}" -f ($i)
+    # Format RestorePoint.Name left aligned with a width of 15 chars, right padded with spaces
+    $RestorePointName = "{0,-15}" -f $LastVMRestorePoint.VmName
+    Write-Host "$ArrayIndexCounter - `RestorePoint:  $RestorePointName  $($LastVMRestorePoint.CreationTime)"
+    Sleep 2
+    $i++
+}
+
+Write-Host "-- All Instant Restores Sessions Started ----------------------"
