@@ -12,6 +12,11 @@
 # 0.7 - Feb 9, 2016 - Added support for optional backup catalog and log purge
 #                     Cleaneed up some code and variable names to (hopefully)
 #                     improve readability
+# 1.0 - Aug 20, 2017 - ** Major changes for 1.0 Release **
+#                      Added suppport for SAP HANA 2.0 SPS1 and greater
+#                      Fixed bugs with log purging
+#                      Added debug mode that can be run from the command line
+#                      Optionally use config in separate file
 
 ####################################################################
 #
@@ -41,12 +46,24 @@
 
 # User configured optoins
 
-# Log purgeoptions
-# If PURGELOGS is set to "true" the script will purge backup entries from the catalog.
-# The query find most recent backup older than PURGEDAYS and removes all entries
-# from the backup catalog as well deleting log backups from the filesystem
-PURGELOGS="true" # Purge backup catalog and log file backups from filesystems
-PURGEDAYS=3      # Purge log backups and catalog data for backups older than this
+# Starting with version 1.0 this script supports the use of an external config file.
+# While it's still possible to manually set the username, password, keyprefix,
+# purgelogs and purgedays options directly in this script, using a config file has
+# the advantagei that future updates to this script can be implmeneted without any
+# changes to the file and the same exact script can be run on many different servers
+# with the config options stored locally on each HANA server.
+#
+# By default the script checks for the config file in the path /etc/veeam/hana.conf
+# but this can be overridden with the -c parameter.
+#
+# If the config file is found, any values set there override values set explicitly below
+
+# Log purge options
+# If "purgelogs" is set to "true" the script will purge backup entries from the catalog.
+# The query finds the newest successful snapshot older than "purgdays" and removes all
+# older entries from the backup catalog as well deleting log backups from the filesystem
+purgelogs="false" # Purge backup catalog and log file backups from filesystems
+purgedays=3       # Purge log backups and catalog data for backups older than this
 
 # This script can use standard username/password or Secure User Store Authentication
 # Secure User Store requires a key for each instance which must be configured outside
@@ -54,8 +71,8 @@ PURGEDAYS=3      # Purge log backups and catalog data for backups older than thi
 # See more details in the Secure User Store section below.
 
 # To use standard Username and Password set these, otherwise leave them empty
-USERNAME=""
-PASSWORD=""
+username=""
+password=""
 
 # To use Secure User Store for SAP HANA authentication select a key prefix.
 # This prefix will be combined with the instance number to reference a specific
@@ -76,26 +93,45 @@ PASSWORD=""
 # Note that it is completely possible for the accounts to be difference for each
 # instance.  The HANA account requires BACKUP ADMIN and CATALOG READ system privledges.
 #
-KEYPREFIX="HDB"
+keyprefix="HDB"
 
 # Additional configurable options
-USRSAP=/usr/sap  # Set to HANA install path
+usrsap=/usr/sap  # Set to HANA install path
 
 # The options below should normally not be changed
-SAPSERVICE_PATH=${USRSAP}/sapservices
-DATE=`date`
-COMMENT="Veeam Backup Post-Thaw - ${DATE}"
+sapservices_file=${usrsap}/sapservices
+date=`date`
+comment="Veeam Backup Post-Thaw - ${date}"
 
 # SQL command strings
-REMSNAPSQL1="BACKUP DATA CLOSE SNAPSHOT BACKUP_ID "
-REMSNAPSQL2="SUCCESSFUL '${COMMENT}'"
-STATUSSQL="SELECT BACKUP_ID from M_BACKUP_CATALOG WHERE                           \
-           STATE_NAME = 'prepared' and ENTRY_TYPE_NAME = 'data snapshot'"
-PURGEIDSQL="SELECT TOP 1 min(to_bigint(BACKUP_ID)) FROM M_BACKUP_CATALOG          \
-            WHERE SYS_START_TIME >= ADD_DAYS(CURRENT_TIMESTAMP, -${PURGEDAYS})    \
-            and ENTRY_TYPE_NAME = 'data snapshot' and STATE_NAME = 'successful'"
-PURGESQL1="BACKUP CATALOG DELETE ALL BEFORE BACKUP_ID"
-PURGESQL2="WITH FILE"
+remsnapsql1="BACKUP DATA"
+remsnapsql2="FOR FULL SYSTEM"
+remsnapsql3="CLOSE SNAPSHOT BACKUP_ID" 
+remsnapsql4="SUCCESSFUL '${comment}'"
+
+statussql1="SELECT BACKUP_ID from M_BACKUP_CATALOG WHERE"
+statussql2="STATE_NAME = 'prepared' and ENTRY_TYPE_NAME = 'data snapshot'"
+
+purgeidsql1="SELECT TOP 1 to_bigint(BACKUP_ID) FROM M_BACKUP_CATALOG"
+purgeidsql2="WHERE SYS_START_TIME <= ADD_DAYS(CURRENT_TIMESTAMP, -${purgedays}) and"
+purgeidsql3="ENTRY_TYPE_NAME = 'data snapshot' and STATE_NAME = 'successful' ORDER BY 1 DESC"
+purgesql1="BACKUP CATALOG DELETE ALL BEFORE BACKUP_ID"
+purgesql2="WITH FILE"
+
+versionsql="SELECT VERSION from M_DATABASE;"
+
+sysidsql="SELECT SYSTEM_ID from M_DATABASE;"
+
+#
+# Functions
+#
+
+# This function makes it easy to retrieve options from a file
+# It borrows heavily from an example on Stack Overflow
+config_get() {
+    val="$(grep -E "^${1}=" -m 1 "${config}" 2>/dev/null | head -n 1 | cut -d '=' -f 2)"
+    printf -- "%s" "${val}"
+}
 
 #
 # This function is copied from "sapinit" script provided by SAP HANA install
@@ -103,45 +139,83 @@ PURGESQL2="WITH FILE"
 # instance information
 #
 read_sapservices() {	
-        if [ ! -r "${SAPSERVICE_PATH}" ]; then
-                echo  "File ${SAPSERVICE_PATH} not found."
-                exit_code=1
+    if [ ! -r "${sapservices_file}" ]; then
+        echo  "File ${sapservices_file} not found."
+        exit_code=1
+    fi
+
+    subexp="pf\=.*|-u *[[:alnum:]]{6}|-D"
+    expression="/usr/sap/[[:alnum:]]{3}/.*sapstartsrv *${subexp} *${subexp} *${subexp}"
+
+    lines=`cat ${sapservices_file} | wc -l`
+
+    ((l=0));((i=1))
+    while ((i <= ${lines}))
+    do
+        pre_l=`head -${i} ${sapservices_file} | tail -1 | grep -E "${expression}"`
+        if [ -n "${pre_l}" ]; then
+            sapservices[${l}]=${pre_l}
+            (( l++ ))
         fi
+        (( i++ ))
+    done
 
-        subexp="pf\=.*|-u *[[:alnum:]]{6}|-D"
-        expression="/usr/sap/[[:alnum:]]{3}/.*sapstartsrv *${subexp} *${subexp} *${subexp}"
-
-        lines=`cat ${SAPSERVICE_PATH} | wc -l`
-
-        ((l=0));((i=1))
-        while ((i <= ${lines}))
-        do
-                pre_l=`head -${i} ${SAPSERVICE_PATH} | tail -1 | grep -E "${expression}"`
-                if [ -n "${pre_l}" ]; then
-                        g_commands[${l}]=${pre_l}
-                        ((l+=1))
-                fi
-                ((i+=1))
-        done
-
-        unset subexp
-        unset expression
-        unset pre_l
-        unset lines
-        unset i
+    unset subexp
+    unset expression
+    unset pre_l
+    unset lines
+    unset i
 }
+
+debug=0
+testmode=0
+
+# Get command line options
+config="/etc/veeam/hana.conf"
+while getopts dtc: option
+do
+    case "${option}"
+    in
+    d) debug=1;;
+    t) testmode=1;;
+    c) config=${OPTARG};;
+    esac
+done
 
 #
 # Main Script
 #
 
+# Call the function to load up sapservices data
 read_sapservices
 
-# Setup the output and authentication options for hdbsql
-if [ -x ${USERNAME} ]; then
-        hdbsqlopts="-a -x -j -U ${KEYPREFIX}"
+# If config file is found grab the options from there
+if [ ! -z ${config} ]; then
+    username="$(config_get username)"
+    password="$(config_get password)"
+    keyprefix="$(config_get keyprefix)"
+    purgelogs="$(config_get purgelogs)"
+    purgedays="$(config_get purgedays)"
+fi
+
+# Setup the authentication options for hdbsql
+if [ -z ${username} ]; then
+    [ $debug -ne 0 ] && echo "Using keystore based authentication"
+    hdbsqlopts="-a -x -j -U ${keyprefix}"
 else
-        hdbsqlopts="-a -x -j -u ${USERNAME} -p ${PASSWORD} -i "
+    if [ $debug -ne 0 ]; then
+        echo "Using user/password based authentication"
+        echo "Username: ${username}"
+        echo "Password: ${password}"
+    fi
+    hdbsqlopts="-a -x -j -u ${username} -p ${password} -i "
+fi
+
+if [ $debug -ne 0 ] && [ ${purgelogs} = "true" ]; then
+    echo
+    echo "Backups prior to the newest successful snapshot > ${purgedays} day(s) old"
+    echo "will be purged from the catalog and filesystem"
+    echo
 fi
 
 # This regex grabs the exe path and profile path for each HANA instances
@@ -153,31 +227,70 @@ hdbinst_regex="SAPSYSTEM.*=.*([0-9]{2})"
 hdbpath=()
 hdbpf=()
 hdbinst=()
+hdbsqlcmd=()
+hdbverstr=()
+hdbrel=()
+hdbrev=()
 backupid=()
+systemid=()
 i=0
-for line in "${g_commands[@]}"
+
+# Loop through every instance found in SAP services
+for line in "${sapservices[@]}"
 do
-	[[ $line =~ $sapservices_regex ]]
-	hdbpath[$i]="${BASH_REMATCH[1]}"
-	hdbpf[$i]="${BASH_REMATCH[2]}"
-	hdbpflines=`cat ${hdbpf[$i]} | grep "SAPSYSTEM"`
-	for hdbpfline in "${hdbpflines}"
-	do
-		if [[ $hdbpfline =~ $hdbinst_regex ]]; then 
-			hdbinst[$i]="${BASH_REMATCH[1]}"
-		fi
-	done
-	hdbsqlcmd="${hdbpath[$i]}/hdbsql ${hdbsqlopts}${hdbinst[$i]}"
-	backupid[$i]=`${hdbsqlcmd} "${STATUSSQL}"`
-	if [[ -z ${backupid[$i]} ]]; then
-		echo "No active snapshot found for this instance!"
-	else
-		${hdbsqlcmd} "${REMSNAPSQL1} ${backupid[$i]} ${REMSNAPSQL2}" &> /dev/null
-		if [ ${PURGELOGS} = "true" ]; then
-			purgeid=`${hdbsqlcmd} "${PURGEIDSQL}"`
-			${hdbsqlcmd} -j ${PURGESQL1} ${purgeid} ${PURGESQL2} &> /dev/null
-		fi 	 
+    [[ $line =~ $sapservices_regex ]]
+    hdbpath[$i]="${BASH_REMATCH[1]}"
+    hdbpf[$i]="${BASH_REMATCH[2]}"
+    hdbpflines=`cat ${hdbpf[$i]} | grep "SAPSYSTEM"`
+    for hdbpfline in "${hdbpflines}"
+    do
+	[[ $hdbpfline =~ $hdbinst_regex ]] && hdbinst[$i]="${BASH_REMATCH[1]}"
+    done
+
+    hdbsqlcmd[$i]="${hdbpath[$i]}/hdbsql ${hdbsqlopts}${hdbinst[$i]}"
+
+    # Query and parse HANA major version and SPS/Revision
+    hdbverstr[$i]=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${versionsql}")
+    hdbverstr[$i]=${hdbverstr[$i]//\"/}
+    hdbver=(${hdbverstr[$i]//./ })
+    # Make sure bash sees these values as decimal
+    hdbrel[$i]=$((10#${hdbver[0]}))
+    hdbrev[$i]=$((10#${hdbver[2]}))
+
+    # If HANA version greater than 2.0 SP1 set some extra options
+    if [ ${hdbrel[$i]} -ge 2 ] && [ ${hdbrev[$i]} -ge 10 ]; then
+        hdbsqlcmd[$i]="${hdbsqlcmd[$i]} -d SYSTEMDB"
+        remsnapsql="${remsnapsql1} ${remsnapsql2} ${remsnapsql3}"
+    else
+        remsnapsql="${remsnapsql1} ${remsnapsql3}"
+    fi
+
+    statussql="${statussql1} ${statussql2}"
+    backupid[$i]=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${statussql}")
+    systemid[$i]=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${sysidsql}")
+    systemid[$i]=${systemid[$i]//\"/}
+
+    if [[ -z ${backupid[$i]} ]]; then
+	echo "No active snapshot found for instance ${systemid[$i]}"
+    else
+	remsnapsql="${remsnapsql} ${backupid[$i]} ${remsnapsql4}"
+	if [ $debug -ne 0 ] || [ $testmode -ne 0 ]; then
+	    echo "LD_LIBRARY_PATH=${hdbpath[$i]}" "${hdbsqlcmd[$i]}" "${remsnapsql}"
 	fi
-	((i+=1))
+	[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${remsnapsql}"
+	if [ ${purgelogs} = "true" ]; then
+	    purgeidsql="${purgeidsql1} ${purgeidsql2} ${purgeidsql3}"
+	    purgeid=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${purgeidsql}")
+	    if [ ! -z ${purgeid} ]; then
+		purgesql="${purgesql1} ${purgeid} ${purgesql2}"
+		if [ $debug -ne 0 ] || [ $testmode -ne 0 ]; then
+		    echo "Purge backups with ID < $purgeid for instance ${systemid[$i]}"
+		    echo "LD_LIBRARY_PATH=${hdbpath[$i]}" "${hdbsqlcmd[$i]}" "${purgesql}"
+		fi
+		[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${purgesql}"
+	    fi
+	fi 	 
+    fi
+    (( i++ ))
 done
 
