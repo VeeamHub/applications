@@ -17,6 +17,7 @@
 #                      Fixed bugs with log purging
 #                      Added debug mode that can be run from the command line
 #                      Optionally use config in separate file
+# 1.1 - Dec 5, 2017 - Minor bugfixes for key auth and config file support
 
 ####################################################################
 #
@@ -130,6 +131,8 @@ sysidsql="SELECT SYSTEM_ID from M_DATABASE;"
 # It borrows heavily from an example on Stack Overflow
 config_get() {
     val="$(grep -E "^${1}=" -m 1 "${config}" 2>/dev/null | head -n 1 | cut -d '=' -f 2)"
+    tmp="${val%\"}"
+    val="${tmp#\"}"
     printf -- "%s" "${val}"
 }
 
@@ -190,7 +193,7 @@ done
 read_sapservices
 
 # If config file is found grab the options from there
-if [ ! -z ${config} ]; then
+if [ -r ${config} ]; then
     username="$(config_get username)"
     password="$(config_get password)"
     keyprefix="$(config_get keyprefix)"
@@ -200,7 +203,10 @@ fi
 
 # Setup the authentication options for hdbsql
 if [ -z ${username} ]; then
-    [ $debug -ne 0 ] && echo "Using keystore based authentication"
+    if [ $debug -ne 0 ]; then
+        echo "Using keystore based authentication"
+        echo "Keyprefix: ${keyprefix}"
+    fi
     hdbsqlopts="-a -x -j -U ${keyprefix}"
 else
     if [ $debug -ne 0 ]; then
