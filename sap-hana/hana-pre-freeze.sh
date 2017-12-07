@@ -17,7 +17,8 @@
 #                      Fixed bugs with log purging
 #                      Added debug mode that can be run from the command line
 #                      Optionally use config in separate file (-c parameter)
-# 1.1 - Dec 5, 2017 - Minor bugfixes for key auth and config file support
+# 1.1 - Dec 6, 2017 -  Bugfixes for key authentication, exit code status,
+#                      and config file support
 
 ####################################################################
 #
@@ -84,6 +85,14 @@ password=""
 # ./hdbuserstore set HDB00 hana01:30015 VEEAM Backup123
 # ./hdbuserstore set HDB01 hana01:30115 VEEAM Backup123
 #
+# For HANA 2.0 SP1 and higher, which are always installed as multi-tenant databases
+# even when a single tenant is in use, you must specify that the connection use
+# the port of the SYSTEMDB as follows:
+# 
+# ./hdbuserstore set HDB00 hana01:30113@SYSTEMDB VEEAM Backup123
+#
+# For more information about keystore use please refer to the SAP HANA documentation.
+#
 # Note that it is completely possible for the accounts to be difference for each
 # instance.  The HANA account requires BACKUP ADMIN and CATALOG READ system privledges.
 #
@@ -145,9 +154,9 @@ read_sapservices() {
         pre_l=`head -${i} ${sapservices_file} | tail -1 | grep -E "${expression}"`
         if [ -n "${pre_l}" ]; then
             sapservices[${l}]=${pre_l}
-            (( l++ ))
+            ((l++))
         fi
-        (( i++ ))
+        ((i++))
     done
 
     unset subexp
@@ -261,7 +270,7 @@ do
 
     [ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${snapsql}" # &> /dev/null
 
-    (( i++ ))
+    ((i++))
 done
 
 backupid=()
@@ -286,11 +295,11 @@ do
 	    echo "LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} ${statussql}"
 	    timeout=0
 	fi 
-            (( i++ ))
+            ((i++))
     done
 done
 
 if (($timeout <= 0)); then
     [ $testmode -eq 0 ] && error_exit "Timeout waiting for HANA DB freeze status!"
 fi
-
+exit 0

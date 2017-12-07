@@ -4,20 +4,21 @@
 #
 # Version History
 #
-# 0.1 - Jan 2, 2016 - First working version, hardcoded commands
-# 0.5 - Feb 7, 2016 - First usable version, automatic sapservices discovery
-#                     Checks snapshot status prior to exit, no more temp files
-# 0.6 - Feb 8, 2016 - Added support for HANA Secure User Store for more
-#                     secure login handling
-# 0.7 - Feb 9, 2016 - Added support for optional backup catalog and log purge
-#                     Cleaneed up some code and variable names to (hopefully)
-#                     improve readability
+# 0.1 - Jan 2, 2016 -  First working version, hardcoded commands
+# 0.5 - Feb 7, 2016 -  First usable version, automatic sapservices discovery
+#                      Checks snapshot status prior to exit, no more temp files
+# 0.6 - Feb 8, 2016 -  Added support for HANA Secure User Store for more
+#                      secure login handling
+# 0.7 - Feb 9, 2016 -  Added support for optional backup catalog and log purge
+#                      Cleaneed up some code and variable names to (hopefully)
+#                      improve readability
 # 1.0 - Aug 20, 2017 - ** Major changes for 1.0 Release **
 #                      Added suppport for SAP HANA 2.0 SPS1 and greater
 #                      Fixed bugs with log purging
 #                      Added debug mode that can be run from the command line
 #                      Optionally use config in separate file
-# 1.1 - Dec 5, 2017 - Minor bugfixes for key auth and config file support
+# 1.1 - Dec 6, 2017 -  Bugfixes for key authentication, exit code status,
+#                      and config file support
 
 ####################################################################
 #
@@ -61,7 +62,7 @@
 
 # Log purge options
 # If "purgelogs" is set to "true" the script will purge backup entries from the catalog.
-# The query finds the newest successful snapshot older than "purgdays" and removes all
+# The query finds the newest successful snapshot older than "purgedays" and removes all
 # older entries from the backup catalog as well deleting log backups from the filesystem
 purgelogs="false" # Purge backup catalog and log file backups from filesystems
 purgedays=3       # Purge log backups and catalog data for backups older than this
@@ -91,8 +92,16 @@ password=""
 # ./hdbuserstore set HDB00 hana01:30015 VEEAM Backup123
 # ./hdbuserstore set HDB01 hana01:30115 VEEAM Backup123
 #
+# For HANA 2.0 SP1 and higher, which are always installed as multi-tenant databases
+# even when a single tenant is in use, you must specify that the connection use
+# the port of the SYSTEMDB as follows:
+# 
+# ./hdbuserstore set HDB00 hana01:30113@SYSTEMDB VEEAM Backup123
+#
+# For more information about keystore use please refer to the SAP HANA documentation.
+#
 # Note that it is completely possible for the accounts to be difference for each
-# instance.  The HANA account requires BACKUP ADMIN and CATALOG READ system privledges.
+# instance.  The HANA account requires BACKUP ADMIN and CATALOG READ system privileges.
 #
 keyprefix="HDB"
 
@@ -158,9 +167,9 @@ read_sapservices() {
         pre_l=`head -${i} ${sapservices_file} | tail -1 | grep -E "${expression}"`
         if [ -n "${pre_l}" ]; then
             sapservices[${l}]=${pre_l}
-            (( l++ ))
+            ((l++))
         fi
-        (( i++ ))
+        ((i++))
     done
 
     unset subexp
@@ -168,6 +177,13 @@ read_sapservices() {
     unset pre_l
     unset lines
     unset i
+}
+
+# A way too simple error handler function
+error_exit()
+{
+    echo "$1" 1>&2
+    exit 1
 }
 
 debug=0
@@ -240,6 +256,7 @@ hdbrev=()
 backupid=()
 systemid=()
 i=0
+errors=0
 
 # Loop through every instance found in SAP services
 for line in "${sapservices[@]}"
@@ -250,7 +267,7 @@ do
     hdbpflines=`cat ${hdbpf[$i]} | grep "SAPSYSTEM"`
     for hdbpfline in "${hdbpflines}"
     do
-	[[ $hdbpfline =~ $hdbinst_regex ]] && hdbinst[$i]="${BASH_REMATCH[1]}"
+		[[ $hdbpfline =~ $hdbinst_regex ]] && hdbinst[$i]="${BASH_REMATCH[1]}"
     done
 
     hdbsqlcmd[$i]="${hdbpath[$i]}/hdbsql ${hdbsqlopts}${hdbinst[$i]}"
@@ -277,26 +294,28 @@ do
     systemid[$i]=${systemid[$i]//\"/}
 
     if [[ -z ${backupid[$i]} ]]; then
-	echo "No active snapshot found for instance ${systemid[$i]}"
+		echo "No active snapshot found for instance ${systemid[$i]}"
+		((errors++))
     else
-	remsnapsql="${remsnapsql} ${backupid[$i]} ${remsnapsql4}"
-	if [ $debug -ne 0 ] || [ $testmode -ne 0 ]; then
-	    echo "LD_LIBRARY_PATH=${hdbpath[$i]}" "${hdbsqlcmd[$i]}" "${remsnapsql}"
-	fi
-	[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${remsnapsql}"
-	if [ ${purgelogs} = "true" ]; then
-	    purgeidsql="${purgeidsql1} ${purgeidsql2} ${purgeidsql3}"
-	    purgeid=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${purgeidsql}")
-	    if [ ! -z ${purgeid} ]; then
-		purgesql="${purgesql1} ${purgeid} ${purgesql2}"
+		remsnapsql="${remsnapsql} ${backupid[$i]} ${remsnapsql4}"
 		if [ $debug -ne 0 ] || [ $testmode -ne 0 ]; then
-		    echo "Purge backups with ID < $purgeid for instance ${systemid[$i]}"
-		    echo "LD_LIBRARY_PATH=${hdbpath[$i]}" "${hdbsqlcmd[$i]}" "${purgesql}"
+			echo "LD_LIBRARY_PATH=${hdbpath[$i]}" "${hdbsqlcmd[$i]}" "${remsnapsql}"
 		fi
-		[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${purgesql}"
-	    fi
-	fi 	 
+		[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${remsnapsql}"
+		if [ ${purgelogs} = "true" ]; then
+			purgeidsql="${purgeidsql1} ${purgeidsql2} ${purgeidsql3}"
+			purgeid=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${purgeidsql}")
+			if [ ! -z ${purgeid} ]; then
+				purgesql="${purgesql1} ${purgeid} ${purgesql2}"
+				if [ $debug -ne 0 ] || [ $testmode -ne 0 ]; then
+					echo "Purge backups with ID < $purgeid for instance ${systemid[$i]}"
+					echo "LD_LIBRARY_PATH=${hdbpath[$i]}" "${hdbsqlcmd[$i]}" "${purgesql}"
+				fi
+				[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${purgesql}"
+			fi
+		fi
     fi
-    (( i++ ))
+    ((i++))
 done
 
+[ $errors -gt 0 ] && error_exit "Snapshots could not be found for some instances!" || exit 0
