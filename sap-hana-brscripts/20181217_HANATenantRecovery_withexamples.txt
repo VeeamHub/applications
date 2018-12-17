@@ -1,0 +1,98 @@
+# Script for HANA restore via backint
+# Version History
+#
+# 0.8 - Nov 28, 2018 - This is more an example file rather then a script...needs to be finetuned for customer environments
+#
+# 
+#
+####################################################################
+#
+# MIT License
+#
+# Copyright (c) 2018 Clemens Zerbe (clemens.zerbe@veeam.com)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+####################################################################
+# User configured options
+#
+# This script can use Secure User Store Authentication
+# Secure User Store requires a key for each instance which must be configured outside
+# of this script using hdbuserstore executable (part of hdbclient install).
+# See more details in the Secure User Store section below.
+#
+# To use Secure User Store for SAP HANA authentication select a key prefix.
+# This prefix will be combined with the instance number to reference a specific
+# key for authentication.  For example, the default prefix is HDB, so for
+# HANA instance 00 the script will attempt to use key HDB00 to authenticate.
+#
+# To create Secure User Store use the following command syntax:
+#
+# ./hdbuserstore set <key> <host>:3<instance#>15 <user> <password>
+# 
+# For example, to create keys for instance 00 and 01 on host "hana01"
+# using a username "VEEAM" and password "Backup123" run the following commands
+# as the OS user that will be running the script to create their secure store:
+#
+# ./hdbuserstore set HDB00 hana01:30015 VEEAM Backup123
+# ./hdbuserstore set HDB01 hana01:30115 VEEAM Backup123
+#
+# For HANA 2.0 SP1 and higher, which are always installed as multi-tenant databases
+# even when a single tenant is in use, you must specify that the connection use
+# the port of the SYSTEMDB as follows:
+# 
+# ./hdbuserstore set HDB00 hana01:30113@SYSTEMDB VEEAM Backup123
+#
+# For more information about keystore use please refer to the SAP HANA documentation.
+#
+# Note that it is completely possible for the accounts to be difference for each
+# instance.  The HANA account requires BACKUP ADMIN and CATALOG READ system privledges.
+#
+hdbuserkey="HDB00" 
+#
+######################################################################
+# other needful variables declaration
+# tenant "" means SYSTEM DB or it needs be filled with a tenant name
+tenant=""
+######################################################################
+
+# A way too simple error handler function
+error_exit()
+{
+    echo "$1" 1>&2
+    exit 1
+}
+#
+# tenant "" means SYSTEM DB or it needs be filled with a tenant name
+tenant=""
+#
+#
+#
+#
+##############################################################
+# SQL backup command can be found here -> https://help.sap.com/viewer/4fe29514fd584807ac9f2a04f6754767/2.0.03/en-US/75a06c444e9a4b3287a46a6a40b4ee69.html
+#
+# Start this script as <SID>adm or any other user with the right to start hdbsql & to read the keystore. 
+#
+# connect to HANA SYSTEM DB with hdbsql and then enter \c -d systemdb or hdbsql -U userkey etc
+hdbsql -U $hdbuserkey -d SYSTEMDB "alter stop database $tenant;"
+# timestamp must be newer than today for a "to last state" recovery
+hdbsql -U $hdbuserkey -d SYSTEMDB "recover database for $tenant until timestamp '2030-01-01 12:00:00' using catalog backint;;
+#
+#
