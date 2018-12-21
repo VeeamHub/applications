@@ -1,0 +1,1 @@
+Example script to trigger RMAN backups using Veeam RMAN Plugin
