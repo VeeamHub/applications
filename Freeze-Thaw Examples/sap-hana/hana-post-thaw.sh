@@ -250,6 +250,7 @@ hdbpath=()
 hdbpf=()
 hdbinst=()
 hdbsqlcmd=()
+hdbpurgecmd=()
 hdbverstr=()
 hdbrel=()
 hdbrev=()
@@ -280,18 +281,20 @@ do
     hdbrel[$i]=$((10#${hdbver[0]}))
     hdbrev[$i]=$((10#${hdbver[2]}))
 
+    statussql="${statussql1} ${statussql2}"
+    backupid[$i]=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${statussql}")
+    systemid[$i]=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${sysidsql}")
+    systemid[$i]=${systemid[$i]//\"/}
+    
     # If HANA version greater than 2.0 SP1 set some extra options
     if [ ${hdbrel[$i]} -ge 2 ] && [ ${hdbrev[$i]} -ge 10 ]; then
         hdbsqlcmd[$i]="${hdbsqlcmd[$i]} -d SYSTEMDB"
+        hdbpurgecmd[$i]="${hdbsqlcmd[$i]} -d ${systemid[$i]}"
         remsnapsql="${remsnapsql1} ${remsnapsql2} ${remsnapsql3}"
     else
         remsnapsql="${remsnapsql1} ${remsnapsql3}"
     fi
 
-    statussql="${statussql1} ${statussql2}"
-    backupid[$i]=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${statussql}")
-    systemid[$i]=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${sysidsql}")
-    systemid[$i]=${systemid[$i]//\"/}
 
     if [[ -z ${backupid[$i]} ]]; then
 		echo "No active snapshot found for instance ${systemid[$i]}"
@@ -304,14 +307,15 @@ do
 		[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${remsnapsql}"
 		if [ ${purgelogs} = "true" ]; then
 			purgeidsql="${purgeidsql1} ${purgeidsql2} ${purgeidsql3}"
-			purgeid=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${purgeidsql}")
+			purgeid=$(LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbpurgecmd[$i]} "${purgeidsql}")
 			if [ ! -z ${purgeid} ]; then
 				purgesql="${purgesql1} ${purgeid} ${purgesql2}"
 				if [ $debug -ne 0 ] || [ $testmode -ne 0 ]; then
 					echo "Purge backups with ID < $purgeid for instance ${systemid[$i]}"
-					echo "LD_LIBRARY_PATH=${hdbpath[$i]}" "${hdbsqlcmd[$i]}" "${purgesql}"
+					echo "LD_LIBRARY_PATH=${hdbpath[$i]}" "${hdbpurgecmd[$i]}" "${purgesql}"
 				fi
 				[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbsqlcmd[$i]} "${purgesql}"
+				[ $testmode -eq 0 ] && LD_LIBRARY_PATH=${hdbpath[$i]} ${hdbpurgecmd[$i]} "${purgesql}"
 			fi
 		fi
     fi
