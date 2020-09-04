@@ -19,6 +19,7 @@
 #                      Optionally use config in separate file (-c parameter)
 # 1.1 - Dec 6, 2017 -  Bugfixes for key authentication, exit code status,
 #                      and config file support
+# 1.2 - Sep 1, 2020 SZ Small changes to regex to detect HANA services
 
 ####################################################################
 #
@@ -140,11 +141,11 @@ config_get() {
 read_sapservices() {	
     if [ ! -r "${sapservices_file}" ]; then
         echo  "File ${sapservices_file} not found."
-            exit_code=1
+        exit_code=1
     fi
 
-    subexp="pf\=.*|-u *[[:alnum:]]{6}|-D"
-    expression="/usr/sap/[[:alnum:]]{3}/.*sapstartsrv *${subexp} *${subexp} *${subexp}"
+    subexp="(pf\=.*|-u *[[:alnum:]]{6}|-D)"
+    expression="/usr/sap/[[:alnum:]]{3}/HDB.*sapstartsrv *${subexp} *${subexp} *${subexp}"
 
     lines=`cat ${sapservices_file} | wc -l`
 
