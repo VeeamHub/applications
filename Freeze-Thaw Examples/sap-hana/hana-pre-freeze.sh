@@ -141,7 +141,7 @@ config_get() {
 read_sapservices() {	
     if [ ! -r "${sapservices_file}" ]; then
         echo  "File ${sapservices_file} not found."
-            exit_code=1
+        exit_code=1
     fi
 
     subexp="(pf\=.*|-u *[[:alnum:]]{6}|-D)"
