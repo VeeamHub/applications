@@ -42,7 +42,7 @@ SCRIPT_USER="root"
 
 # Start scripts asynchronous if set to `1`
 # Asynchronous start will not wait for the script to finish
-ASYNC_MODE=1 
+ASYNC_MODE=0
 
 # Logfile for this script, will contain script output in sync mode
 LOG_FILE="/var/log/veeam/scripts/pre.log"

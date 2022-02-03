@@ -28,20 +28,20 @@
 # !!!! TODO!!!!!
 
 # Run all scripts from this folder in order as returned by `find`
-SCRIPT_FOLDER="/opt/veeam/scripts/pre" 
+SCRIPT_FOLDER="/opt/veeam/scripts/post" 
 
 # Run scripts as this user
 SCRIPT_USER="root"  
 
 # Start scripts asynchronous if set to `1`
 # Asynchronous start will not wait for the script to finish
-ASYNC_MODE=1 
+ASYNC_MODE=0
 
 # Logfile for this script, will contain script output in sync mode
-LOG_FILE="/var/log/veeam/scripts/pre.log"
+LOG_FILE="/var/log/veeam/scripts/post.log"
 
 # File for the PID of this pre-script
-PID_FILE="/var/run/veeam-pre-machine-freeze.pid"
+PID_FILE="/var/run/veeam-post-machine-thaw.pid"
 
 ################################################################################
 
