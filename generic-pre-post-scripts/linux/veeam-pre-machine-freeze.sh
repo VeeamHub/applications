@@ -2,7 +2,7 @@
 
 # veeam-pre-machine-freeze.sh
 ##### LICENSE ##################################################################
-# Copyright 2021 Stefan Zimmermann <stefan.zimmermann@veeam.com>
+# Copyright 2021-2022 Stefan Zimmermann <stefan.zimmermann@veeam.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy 
 # of this software and associated documentation files (the "Software"), to deal 
@@ -21,18 +21,11 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 # SOFTWARE.
-##### README ###################################################################
-# This is a generic pre-freeze script which can be used to start scripts 
-# present on the Veeam backed up machine. 
-# It can call scripts in synchronous mode (wait for results) or asynchronous 
-# mode (just start them and return directly) - normally you want to do the prior
-# This script is meant as a sample and can be adjusted in any way. 
-# Please consider giving back updates & improvements in this script to the 
-# community.
 ##### VERSION HISTORY ##########################################################
-#
-# !!!! TODO!!!!!
+# v1.0.0    18.08.2022  Initial public release version
 
+##### VARIABLES ################################################################
+# Please adjust the following variables to your needs.
 
 # Run all scripts from this folder in order as returned by `find`
 SCRIPT_FOLDER="/opt/veeam/scripts/pre" 
@@ -44,6 +37,10 @@ SCRIPT_USER="root"
 # Asynchronous start will not wait for the script to finish
 ASYNC_MODE=0
 
+# Number of seconds to sleep at the end of this script. 
+# This is only used in ASYNC_MODE=1 and is useful to give the async scripts some time to work before the external freeze happens
+ASYNC_SLEEP=10
+
 # Logfile for this script, will contain script output in sync mode
 LOG_FILE="/var/log/veeam/scripts/pre.log"
 
@@ -51,6 +48,8 @@ LOG_FILE="/var/log/veeam/scripts/pre.log"
 PID_FILE="/var/run/veeam-pre-machine-freeze.pid"
 
 ################################################################################
+
+VERSION="1.0.0"
 
 # Rotate the scripts log file if savelog is available
 # keeps 7 versions of the log per default
@@ -96,7 +95,7 @@ log() {
     fi
 }
 
-inf "Starting $0"
+inf "Starting $0 - Version $VERSION"
 
 # Fail if another PID file is found
 if [ -f $PID_FILE ]
@@ -138,6 +137,12 @@ do
         break 2
     fi
 done
+
+if [ $ASYNC_MODE == 1 ]
+then
+    inf "Sleep for $ASYNC_SLEEP seconds before returning"
+    sleep $ASYNC_SLEEP
+fi
 
 rm -f $PID_FILE &> /dev/null
 if [ $? != 0 ]

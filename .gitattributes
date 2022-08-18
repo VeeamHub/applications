@@ -1,0 +1,9 @@
+# Default behavior
+* text=auto
+
+# Windows line endings only
+*.md text eol=crlf
+*.cmd text eol=crlf
+
+# Linux line endings only
+*.sh text eol=lf
