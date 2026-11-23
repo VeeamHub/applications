@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # hana-pre-freeze.sh
 #
@@ -20,7 +19,7 @@
 # 1.1 - Dec 6, 2017 -  Bugfixes for key authentication, exit code status,
 #                      and config file support
 # 1.2 - Sep 1, 2020 SZ Small changes to regex to detect HANA services
-# 2.0 - Feb 4, 2026 WS ** Major changes for 2.0 Release **
+# 2.0 - Nov 23, 2026 WS/vnote42 ** Major changes for 2.0 Release **
 #                      - Added support for the new "systemctl" format of the
 #                        sapservices file used by current SAP HANA / Linux
 #                        releases, while keeping support for the legacy
