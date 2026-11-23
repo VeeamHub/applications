@@ -99,6 +99,10 @@ A dry run of the full cycle:
 ./hana-post-thaw.sh  -d -t
 ```
 
+## Tested Versions
+* Veeam Backup & Replication: v13, v13.1
+* SAP HANA: SAP HANA Express 2.0 and 1.x
+
 ## Known Issues
 * *None*
 
